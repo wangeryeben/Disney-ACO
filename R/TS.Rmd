@@ -1,0 +1,87 @@
+---
+title: "Time Series"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(stringr)
+library(ggplot2)
+library(gridExtra)
+library(xgboost)
+library(data.table)
+library(forecast)
+library(tseries)
+library(mlr)
+library(caret)
+library(mltools)
+```
+
+```{r}
+df<-read.csv("df.csv")
+df$WDWTICKETSEASON<-factor(df$WDWTICKETSEASON)
+df$DAYOFWEEK<-factor(df$DAYOFWEEK)
+df$inSession=df$inSession/100
+dt<-data.table(df)
+dt<-one_hot(dt,cols=c("WDWTICKETSEASON","DAYOFWEEK"))
+dt<-data.frame(dt)
+dt<-dt[,-c(3,4,12,15)]
+```
+
+
+## Xgboost
+```{r}
+set.seed(123)
+indexes = createDataPartition(dt$Hour15, p = .7, list = F)
+train = dt[indexes, ]
+test = dt[-indexes, ]
+
+train_x=data.matrix(train[,-1])
+train_y=data.matrix(train[,c(1)])
+
+test_x=data.matrix(test[,-1])
+test_y=data.matrix(test[,c(1)])
+
+xgb_train=xgb.DMatrix(data=train_x,label=train_y)
+xgb_test=xgb.DMatrix(data=test_x,label=test_y)
+
+xgbc = xgboost(data = xgb_train, max.depth = 2, nrounds = 50)
+
+pred_y<-predict(xgbc,xgb_test)
+mse = mean((test_y - pred_y)^2)
+
+xgb.plot.importance(xgb.importance(model=xgbc))
+```
+
+## Linear Regression
+```{r}
+lm=lm(Hour15~.,data=train)
+lm_pred<-predict(lm,test[,-1])
+mse=mean((test_y-lm_pred)^2)
+```
+
+## Historical Average
+```{r}
+
+day=1:92
+testday=day[-indexes]
+k=0
+aver_pred=rep(0,24)
+for (i in testday)
+{
+  k=k+1
+  j=floor(i/7)
+  if (j>=2)
+  {
+    j=2
+  }
+  his=1:j
+  his=his*7
+  aver_pred[k]=mean(dt$Hour15[i-his])
+  print(k)
+}
+
+mse=mean((test_y-aver_pred)^2)
